@@ -118,15 +118,29 @@ void BalloonScene::generateBackgroundTile() {
   uint8_t cloudB = CLOUD_COLOR & 0xFF;
   uint16_t cloudColor = Display::rgb565(cloudR, cloudG, cloudB);
 
-  // Cloud 1 (upper area - around 1/6 down screen)
-  _bgTile->fillEllipse(16, 30, 12, 6, cloudColor);
-  _bgTile->fillEllipse(12, 32, 8, 5, cloudColor);
-  _bgTile->fillEllipse(22, 32, 9, 5, cloudColor);
+  // Cloud 1 (smaller ellipses for more visible bumps, then cut bottom)
+  _bgTile->fillEllipse(16, 27, 7, 4, cloudColor);
+  _bgTile->fillEllipse(10, 29, 5, 3, cloudColor);
+  _bgTile->fillEllipse(25, 29, 6, 3, cloudColor);
+  // Cut bottom at y=31 by redrawing background bands over it
+  for (int y = 31; y < 38; y++) {
+    int band = y / (TILE_HEIGHT / NUM_BANDS);
+    if (band >= NUM_BANDS) band = NUM_BANDS - 1;
+    uint32_t hex = SUNSET_BANDS[band];
+    _bgTile->drawFastHLine(0, y, TILE_WIDTH, Display::rgb565((hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF));
+  }
 
-  // Cloud 2 (middle area - around 1/2 down screen)
-  _bgTile->fillEllipse(50, 70, 10, 5, cloudColor);
-  _bgTile->fillEllipse(45, 72, 7, 4, cloudColor);
-  _bgTile->fillEllipse(56, 71, 6, 4, cloudColor);
+  // Cloud 2 (smaller ellipses for more visible bumps, then cut bottom)
+  _bgTile->fillEllipse(50, 76, 6, 4, cloudColor);
+  _bgTile->fillEllipse(42, 78, 5, 3, cloudColor);
+  _bgTile->fillEllipse(56, 77, 4, 3, cloudColor);
+  // Cut bottom at y=78
+  for (int y = 78; y < 85; y++) {
+    int band = y / (TILE_HEIGHT / NUM_BANDS);
+    if (band >= NUM_BANDS) band = NUM_BANDS - 1;
+    uint32_t hex = SUNSET_BANDS[band];
+    _bgTile->drawFastHLine(0, y, TILE_WIDTH, Display::rgb565((hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF));
+  }
 }
 
 void BalloonScene::drawBalloonString(Canvas& canvas, int x, int stringStartY, float stringVelocity, uint16_t stringColor) {
