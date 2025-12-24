@@ -15,9 +15,20 @@ public:
   int getFps() const override { return 50; }
 
 private:
+  struct Collectible {
+    float x;
+    float y;
+    bool active;
+    bool collecting;
+    float fadeTimer;
+  };
+
   void generateBackgroundTile();
   void drawBalloon(Canvas& canvas, int x, int y, uint16_t color, float squash, int8_t squashDir, float stringVelocity);
   void drawBalloonString(Canvas& canvas, int x, int y, float stringVelocity, uint16_t stringColor);
+  void drawCollectible(Canvas& canvas, float x, float y, float alpha);
+  void spawnCollectible(int index);
+  void checkCollectibleCollision(int balloonX, int balloonY);
 
   // Background
   LGFX_Sprite* _bgTile;
@@ -30,6 +41,10 @@ private:
   // String physics simulation
   float _stringEndY;        // Simulated string end Y position
   float _stringEndVelocity; // String end Y velocity
+
+  // Collectibles
+  static const int MAX_COLLECTIBLES = 5;
+  Collectible _collectibles[MAX_COLLECTIBLES];
 
   // Score
   unsigned long _score;

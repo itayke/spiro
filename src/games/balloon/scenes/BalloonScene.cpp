@@ -14,6 +14,12 @@
 
 // Timing
 static const float SCROLL_SPEED = 30.0f;  // pixels per second
+static const float COLLECTIBLE_SPEED = 40.0f;  // slightly faster than bg
+
+// Collectible
+static const int COLLECTIBLE_RADIUS = 3;
+static const uint32_t COLLECTIBLE_COLOR = 0xFFFFFF;
+static const float COLLECTIBLE_FADE_TIME = 0.25f;
 
 // Background tile (width for scrolling, height matches screen)
 static const int TILE_WIDTH = 64;
@@ -96,6 +102,11 @@ void BalloonScene::init() {
   _bgTile->setColorDepth(16);
   _bgTile->createSprite(TILE_WIDTH, TILE_HEIGHT);
   generateBackgroundTile();
+
+  // Initialize collectibles
+  for (int i = 0; i < MAX_COLLECTIBLES; i++) {
+    spawnCollectible(i);
+  }
 }
 
 void BalloonScene::generateBackgroundTile() {
@@ -140,6 +151,65 @@ void BalloonScene::generateBackgroundTile() {
     if (band >= NUM_BANDS) band = NUM_BANDS - 1;
     uint32_t hex = SUNSET_BANDS[band];
     _bgTile->drawFastHLine(0, y, TILE_WIDTH, Display::rgb565((hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF));
+  }
+}
+
+void BalloonScene::spawnCollectible(int index) {
+  _collectibles[index].x = SCREEN_WIDTH + (rand() % SCREEN_WIDTH);
+  _collectibles[index].y = BALLOON_Y_MARGIN + (rand() % (SCREEN_HEIGHT - 2 * BALLOON_Y_MARGIN));
+  _collectibles[index].active = true;
+  _collectibles[index].collecting = false;
+  _collectibles[index].fadeTimer = 0.0f;
+}
+
+void BalloonScene::drawCollectible(Canvas& canvas, float x, float y, float alpha) {
+  // Get background color at collectible position
+  int collectY = (int)y;
+  int band = collectY / (TILE_HEIGHT / NUM_BANDS);
+  if (band >= NUM_BANDS) band = NUM_BANDS - 1;
+  uint32_t bgHex = SUNSET_BANDS[band];
+  uint8_t bgR = (bgHex >> 16) & 0xFF;
+  uint8_t bgG = (bgHex >> 8) & 0xFF;
+  uint8_t bgB = bgHex & 0xFF;
+
+  uint8_t r = (COLLECTIBLE_COLOR >> 16) & 0xFF;
+  uint8_t g = (COLLECTIBLE_COLOR >> 8) & 0xFF;
+  uint8_t b = COLLECTIBLE_COLOR & 0xFF;
+
+  // Pure white fading to background
+  canvas.fillCircle((int)x, (int)y, COLLECTIBLE_RADIUS + 1,
+    Display::rgb565(
+      bgR * (1.0f - alpha * 0.3f) + r * alpha * 0.3f,
+      bgG * (1.0f - alpha * 0.3f) + g * alpha * 0.3f,
+      bgB * (1.0f - alpha * 0.3f) + b * alpha * 0.3f));
+  canvas.fillCircle((int)x, (int)y, COLLECTIBLE_RADIUS,
+    Display::rgb565(
+      bgR * (1.0f - alpha * 0.6f) + r * alpha * 0.6f,
+      bgG * (1.0f - alpha * 0.6f) + g * alpha * 0.6f,
+      bgB * (1.0f - alpha * 0.6f) + b * alpha * 0.6f));
+  canvas.fillCircle((int)x, (int)y, COLLECTIBLE_RADIUS - 1,
+    Display::rgb565(
+      bgR * (1.0f - alpha) + r * alpha,
+      bgG * (1.0f - alpha) + g * alpha,
+      bgB * (1.0f - alpha) + b * alpha));
+}
+
+void BalloonScene::checkCollectibleCollision(int balloonX, int balloonY) {
+  float collisionRadius = BALLOON_HEIGHT + COLLECTIBLE_RADIUS;
+  float collisionRadiusSquared = collisionRadius * collisionRadius;
+
+  for (int i = 0; i < MAX_COLLECTIBLES; i++) {
+    if (!_collectibles[i].active || _collectibles[i].collecting) continue;
+
+    float dx = balloonX - _collectibles[i].x;
+    float dy = balloonY - _collectibles[i].y;
+    float distanceSquared = dx * dx + dy * dy;
+
+    if (distanceSquared < collisionRadiusSquared) {
+      _collectibles[i].collecting = true;
+      _collectibles[i].fadeTimer = 0.0f;
+      _score++;
+    }
   }
 }
 
@@ -250,8 +320,8 @@ void BalloonScene::update(float dt) {
 
   // String physics: simulate string end following balloon Y position
   // String end Y tries to follow balloon's normalized Y with spring physics
-  float balloonY = _smoothedNormalized;
-  float stringDelta = balloonY - _stringEndY;
+  float balloonNormalizedY = _smoothedNormalized;
+  float stringDelta = balloonNormalizedY - _stringEndY;
 
   // Apply spring force (delta pushes velocity toward balloon)
   _stringEndVelocity += stringDelta * STRING_SPRING_FORCE * dt;
@@ -262,8 +332,33 @@ void BalloonScene::update(float dt) {
   // Update string end position
   _stringEndY += _stringEndVelocity * dt;
 
-  // Update score (1 point per frame for now)
-  _score++;
+  // Update collectibles
+  for (int i = 0; i < MAX_COLLECTIBLES; i++) {
+    if (!_collectibles[i].active) continue;
+
+    _collectibles[i].x -= COLLECTIBLE_SPEED * dt;
+
+    // Handle fade animation
+    if (_collectibles[i].collecting) {
+      _collectibles[i].fadeTimer += dt;
+      if (_collectibles[i].fadeTimer >= COLLECTIBLE_FADE_TIME) {
+        _collectibles[i].active = false;
+        spawnCollectible(i);
+      }
+    }
+
+    // Respawn if off screen
+    if (_collectibles[i].x < -COLLECTIBLE_RADIUS && !_collectibles[i].collecting) {
+      spawnCollectible(i);
+    }
+  }
+
+  // Check balloon collision with collectibles
+  int balloonX = (int)(SCREEN_WIDTH * BALLOON_X_RATIO);
+  int centerY = SCREEN_HEIGHT / 2;
+  int maxDisplacement = (SCREEN_HEIGHT / 2) - BALLOON_Y_MARGIN;
+  int balloonY = centerY - (int)(_smoothedNormalized * maxDisplacement);
+  checkCollectibleCollision(balloonX, balloonY);
 }
 
 void BalloonScene::draw(Canvas& canvas) {
@@ -302,6 +397,17 @@ void BalloonScene::draw(Canvas& canvas) {
     BALLOON_COLOR & 0xFF
   );
   drawBalloon(canvas, balloonX, balloonY, balloonColor, squash, squashDir, _stringEndVelocity);
+
+  // Draw collectibles (on top of balloon)
+  for (int i = 0; i < MAX_COLLECTIBLES; i++) {
+    if (_collectibles[i].active) {
+      float alpha = 1.0f;
+      if (_collectibles[i].collecting) {
+        alpha = 1.0f - (_collectibles[i].fadeTimer / COLLECTIBLE_FADE_TIME);
+      }
+      drawCollectible(canvas, _collectibles[i].x, _collectibles[i].y, alpha);
+    }
+  }
 
   // Draw HUD - score on top-right, right-justified
   canvas.setTextColor(TFT_WHITE);
