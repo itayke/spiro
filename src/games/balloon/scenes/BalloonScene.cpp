@@ -15,21 +15,24 @@
 // Timing
 static const float SCROLL_SPEED = 30.0f;  // pixels per second
 
-// Background tile
-static const int TILE_SIZE = 64;
+// Background tile (width for scrolling, height matches screen)
+static const int TILE_WIDTH = 64;
+static const int TILE_HEIGHT = SCREEN_HEIGHT;
 
-// Sky colors (top to bottom gradient)
-static const uint8_t SKY_TOP_R = 100;
-static const uint8_t SKY_TOP_G = 150;
-static const uint8_t SKY_TOP_B = 255;
-static const uint8_t SKY_GRADIENT_R = 30;
-static const uint8_t SKY_GRADIENT_G = 20;
-static const uint8_t SKY_GRADIENT_B = 30;
+static const uint32_t SUNSET_BANDS[] = {
+  0x962730,
+  0xcc2e2b,
+  0xf45327,
+  0xfa7e38,
+  0xfa9c78,
+  0xfa6859,
+  0xfb9e75,
+  0xfad28d,
+  0xf8a755
+};
+static const int NUM_BANDS = sizeof(SUNSET_BANDS) / sizeof(SUNSET_BANDS[0]);
 
-// Cloud colors
-static const uint8_t CLOUD_R = 240;
-static const uint8_t CLOUD_G = 245;
-static const uint8_t CLOUD_B = 255;
+static const uint32_t CLOUD_COLOR = 0xfa946e;
 
 // Balloon position
 static const float BALLOON_X_RATIO = 0.25f;
@@ -59,19 +62,14 @@ static const int BALLOON_HIGHLIGHT_X_OFFSET = -3;
 static const int BALLOON_HIGHLIGHT_Y_OFFSET = -4;
 static const int BALLOON_HIGHLIGHT_W = 2;
 static const int BALLOON_HIGHLIGHT_H = 3;
-static const int BALLOON_KNOT_WIDTH = 2;
-static const int BALLOON_KNOT_HEIGHT = 3;
+static const int BALLOON_KNOT_WIDTH = 4;
+static const int BALLOON_KNOT_HEIGHT = 4;
+static const int BALLOON_KNOT_OFFSET = -2;
 
-// Balloon colors
-static const uint8_t BALLOON_R = 255;
-static const uint8_t BALLOON_G = 80;
-static const uint8_t BALLOON_B = 80;
-static const uint8_t BALLOON_HIGHLIGHT_R = 255;
-static const uint8_t BALLOON_HIGHLIGHT_G = 200;
-static const uint8_t BALLOON_HIGHLIGHT_B = 200;
-static const uint8_t STRING_R = 100;
-static const uint8_t STRING_G = 80;
-static const uint8_t STRING_B = 60;
+static const uint32_t BALLOON_COLOR = 0xFF5050;
+static const uint32_t BALLOON_OUTLINE_COLOR = 0x321414;
+static const uint32_t BALLOON_HIGHLIGHT_COLOR = 0xFFC8C8;
+static const uint32_t STRING_COLOR = 0x64503C;
 
 // ========================================
 
@@ -96,32 +94,39 @@ BalloonScene::~BalloonScene() {
 void BalloonScene::init() {
   _bgTile = new LGFX_Sprite(&display.getLcd());
   _bgTile->setColorDepth(16);
-  _bgTile->createSprite(TILE_SIZE, TILE_SIZE);
+  _bgTile->createSprite(TILE_WIDTH, TILE_HEIGHT);
   generateBackgroundTile();
 }
 
 void BalloonScene::generateBackgroundTile() {
-  // Sky gradient base
-  for (int y = 0; y < TILE_SIZE; y++) {
-    uint8_t r = SKY_TOP_R - (y * SKY_GRADIENT_R / TILE_SIZE);
-    uint8_t g = SKY_TOP_G - (y * SKY_GRADIENT_G / TILE_SIZE);
-    uint8_t b = SKY_TOP_B - (y * SKY_GRADIENT_B / TILE_SIZE);
-    uint16_t color = Display::rgb565(r, g, b);
-    _bgTile->drawFastHLine(0, y, TILE_SIZE, color);
+  const int bandHeight = TILE_HEIGHT / NUM_BANDS;
+
+  for (int y = 0; y < TILE_HEIGHT; y++) {
+    int band = y / bandHeight;
+    if (band >= NUM_BANDS) band = NUM_BANDS - 1;
+
+    uint32_t hex = SUNSET_BANDS[band];
+    uint8_t r = (hex >> 16) & 0xFF;
+    uint8_t g = (hex >> 8) & 0xFF;
+    uint8_t b = hex & 0xFF;
+    uint16_t rgb565 = Display::rgb565(r, g, b);
+    _bgTile->drawFastHLine(0, y, TILE_WIDTH, rgb565);
   }
 
-  // Add some simple cloud shapes
-  uint16_t cloudColor = Display::rgb565(CLOUD_R, CLOUD_G, CLOUD_B);
+  uint8_t cloudR = (CLOUD_COLOR >> 16) & 0xFF;
+  uint8_t cloudG = (CLOUD_COLOR >> 8) & 0xFF;
+  uint8_t cloudB = CLOUD_COLOR & 0xFF;
+  uint16_t cloudColor = Display::rgb565(cloudR, cloudG, cloudB);
 
-  // Cloud 1
-  _bgTile->fillEllipse(16, 20, 12, 6, cloudColor);
-  _bgTile->fillEllipse(12, 22, 8, 5, cloudColor);
-  _bgTile->fillEllipse(22, 22, 9, 5, cloudColor);
+  // Cloud 1 (upper area - around 1/6 down screen)
+  _bgTile->fillEllipse(16, 30, 12, 6, cloudColor);
+  _bgTile->fillEllipse(12, 32, 8, 5, cloudColor);
+  _bgTile->fillEllipse(22, 32, 9, 5, cloudColor);
 
-  // Cloud 2
-  _bgTile->fillEllipse(50, 45, 10, 5, cloudColor);
-  _bgTile->fillEllipse(45, 47, 7, 4, cloudColor);
-  _bgTile->fillEllipse(56, 46, 6, 4, cloudColor);
+  // Cloud 2 (middle area - around 1/2 down screen)
+  _bgTile->fillEllipse(50, 70, 10, 5, cloudColor);
+  _bgTile->fillEllipse(45, 72, 7, 4, cloudColor);
+  _bgTile->fillEllipse(56, 71, 6, 4, cloudColor);
 }
 
 void BalloonScene::drawBalloonString(Canvas& canvas, int x, int stringStartY, float stringVelocity, uint16_t stringColor) {
@@ -174,34 +179,54 @@ void BalloonScene::drawBalloon(Canvas& canvas, int x, int y, uint16_t color, flo
     }
   }
 
-  // Balloon body (ellipse)
+  uint16_t outlineColor = Display::rgb565(
+    (BALLOON_OUTLINE_COLOR >> 16) & 0xFF,
+    (BALLOON_OUTLINE_COLOR >> 8) & 0xFF,
+    BALLOON_OUTLINE_COLOR & 0xFF
+  );
+
+  int knotY = adjustedY + height + BALLOON_KNOT_OFFSET;
+
+  // Draw all outlines first
+  canvas.fillEllipse(x, adjustedY, width + 1, height + 1, outlineColor);
+  canvas.fillTriangle(x - BALLOON_KNOT_WIDTH - 1, knotY,
+                      x + BALLOON_KNOT_WIDTH + 1, knotY,
+                      x, knotY + BALLOON_KNOT_HEIGHT + 3,
+                      outlineColor);
+
+  // Draw all fills on top
   canvas.fillEllipse(x, adjustedY, width, height, color);
 
-  // Highlight (scale with squash)
-  uint16_t highlight = Display::rgb565(BALLOON_HIGHLIGHT_R, BALLOON_HIGHLIGHT_G, BALLOON_HIGHLIGHT_B);
+  uint16_t highlight = Display::rgb565(
+    (BALLOON_HIGHLIGHT_COLOR >> 16) & 0xFF,
+    (BALLOON_HIGHLIGHT_COLOR >> 8) & 0xFF,
+    BALLOON_HIGHLIGHT_COLOR & 0xFF
+  );
   int highlightH = (int)(BALLOON_HIGHLIGHT_H * squashFactor);
   int highlightW = (int)(BALLOON_HIGHLIGHT_W * stretchFactor);
   int highlightY = adjustedY + (int)(BALLOON_HIGHLIGHT_Y_OFFSET * squashFactor);
   canvas.fillEllipse(x + BALLOON_HIGHLIGHT_X_OFFSET, highlightY, highlightW, highlightH, highlight);
 
-  // Knot at bottom
-  int knotY = adjustedY + height - 2;
   canvas.fillTriangle(x - BALLOON_KNOT_WIDTH, knotY,
                       x + BALLOON_KNOT_WIDTH, knotY,
                       x, knotY + BALLOON_KNOT_HEIGHT + 2,
                       color);
 
   // Draw string starting from bottom of knot
-  int stringStartY = knotY + BALLOON_KNOT_HEIGHT + 2;
-  uint16_t stringColor = Display::rgb565(STRING_R, STRING_G, STRING_B);
+  int stringStartY = knotY + BALLOON_KNOT_HEIGHT + 4;
+  uint16_t stringColor = Display::rgb565(
+    (STRING_COLOR >> 16) & 0xFF,
+    (STRING_COLOR >> 8) & 0xFF,
+    STRING_COLOR & 0xFF
+  );
   drawBalloonString(canvas, x, stringStartY, stringVelocity, stringColor);
 }
 
 void BalloonScene::update(float dt) {
   // Update scroll position (scroll left)
   _scrollX += SCROLL_SPEED * dt;
-  if (_scrollX >= TILE_SIZE) {
-    _scrollX -= TILE_SIZE;
+  if (_scrollX >= TILE_WIDTH) {
+    _scrollX -= TILE_WIDTH;
   }
 
   // Smooth breath input
@@ -228,12 +253,10 @@ void BalloonScene::update(float dt) {
 }
 
 void BalloonScene::draw(Canvas& canvas) {
-  // Draw tiled background with scroll offset
+  // Draw tiled background with horizontal scroll offset (no vertical tiling)
   int offsetX = -(int)_scrollX;
-  for (int tx = offsetX; tx < SCREEN_WIDTH; tx += TILE_SIZE) {
-    for (int ty = 0; ty < SCREEN_HEIGHT; ty += TILE_SIZE) {
-      _bgTile->pushSprite(&canvas, tx, ty);
-    }
+  for (int tx = offsetX; tx < SCREEN_WIDTH; tx += TILE_WIDTH) {
+    _bgTile->pushSprite(&canvas, tx, 0);
   }
 
   // Calculate balloon position
@@ -259,7 +282,11 @@ void BalloonScene::draw(Canvas& canvas) {
   int balloonY = centerY - (int)(normalized * maxDisplacement);
 
   // Draw balloon with squash effect
-  uint16_t balloonColor = Display::rgb565(BALLOON_R, BALLOON_G, BALLOON_B);
+  uint16_t balloonColor = Display::rgb565(
+    (BALLOON_COLOR >> 16) & 0xFF,
+    (BALLOON_COLOR >> 8) & 0xFF,
+    BALLOON_COLOR & 0xFF
+  );
   drawBalloon(canvas, balloonX, balloonY, balloonColor, squash, squashDir, _stringEndVelocity);
 
   // Draw HUD - score on top-right, right-justified
