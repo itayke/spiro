@@ -208,24 +208,33 @@ pressureSensor.update();
 float delta = pressureSensor.getDelta();  // Pascals from baseline
 ```
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test in simulator and on hardware
-5. Submit a pull request
-
 ## License
 
-[Add your license here]
+MIT License (Non-Commercial Use)
+
+Copyright (c) 2025 Keren Software LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, modify, and merge copies of the Software for **non-commercial purposes only**,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+**Commercial use of this Software is strictly prohibited without prior written
+permission from the copyright holders.**
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ## Credits
 
-- Original Inhale project foundation
+- Platform and interactions developed by Itay Keren
 - LovyanGFX graphics library
 - Adafruit sensor libraries
-
----
-
-**Note**: This is the successor to the monolithic "Inhale" project, refactored for modularity and future OTA capabilities.
