@@ -34,10 +34,10 @@ private:
   LGFX_Sprite* _bgTile;
   float _scrollX;
 
-  // Collectible sprite
-  LGFX_Sprite* _collectibleSprite;
-  float _lastSpriteAlpha;
-  void updateCollectibleSprite(float alpha);
+  // Collectible sprites (keyframes for fade animation)
+  static const int COLLECTIBLE_KEYFRAMES = 5;
+  LGFX_Sprite* _collectibleSprites[COLLECTIBLE_KEYFRAMES];
+  void createCollectibleSprites();
 
   // Balloon state
   float _smoothedNormalized;

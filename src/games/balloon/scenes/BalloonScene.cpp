@@ -19,7 +19,10 @@ static const float COLLECTIBLE_SPEED = 40.0f;  // slightly faster than bg
 // Collectible
 static const int COLLECTIBLE_RADIUS = 3;
 static const uint32_t COLLECTIBLE_COLOR = 0xFFFFFF;
+static const uint32_t COLLECTIBLE_FADE_COLOR = 0xfa9c78;  // Middle bg band color
 static const float COLLECTIBLE_FADE_TIME = 0.25f;
+static const float COLLECTIBLE_OUTER_FADE = 0.6f;   // Outer edge lerps more towards fade color
+static const float COLLECTIBLE_MIDDLE_FADE = 0.8f;  // Middle lerps more towards fade color
 
 // Background tile (width for scrolling, height matches screen)
 static const int TILE_WIDTH = 64;
@@ -81,14 +84,15 @@ static const uint32_t STRING_COLOR = 0x64503C;
 
 BalloonScene::BalloonScene()
   : _bgTile(nullptr)
-  , _collectibleSprite(nullptr)
-  , _lastSpriteAlpha(-1.0f)
   , _scrollX(0)
   , _smoothedNormalized(0)
   , _deltaNormalizedY(0)
   , _stringEndY(0)
   , _stringEndVelocity(0)
   , _score(0) {
+  for (int i = 0; i < COLLECTIBLE_KEYFRAMES; i++) {
+    _collectibleSprites[i] = nullptr;
+  }
 }
 
 BalloonScene::~BalloonScene() {
@@ -97,10 +101,12 @@ BalloonScene::~BalloonScene() {
     delete _bgTile;
     _bgTile = nullptr;
   }
-  if (_collectibleSprite) {
-    _collectibleSprite->deleteSprite();
-    delete _collectibleSprite;
-    _collectibleSprite = nullptr;
+  for (int i = 0; i < COLLECTIBLE_KEYFRAMES; i++) {
+    if (_collectibleSprites[i]) {
+      _collectibleSprites[i]->deleteSprite();
+      delete _collectibleSprites[i];
+      _collectibleSprites[i] = nullptr;
+    }
   }
 }
 
@@ -110,18 +116,8 @@ void BalloonScene::init() {
   _bgTile->createSprite(TILE_WIDTH, TILE_HEIGHT);
   generateBackgroundTile();
 
-  // Create collectible sprite
-  // Note: Simulator's 32-bit support is broken (creates sprite but crashes on use)
-  int spriteSize = (COLLECTIBLE_RADIUS + 2) * 2;
-  _collectibleSprite = new LGFX_Sprite(&display.getLcd());
-
-#ifdef SIMULATOR
-  _collectibleSprite->setColorDepth(16);  // Simulator: use 16-bit RGB565
-#else
-  _collectibleSprite->setColorDepth(32);  // Hardware: use 32-bit ARGB for proper alpha
-#endif
-
-  _collectibleSprite->createSprite(spriteSize, spriteSize);
+  // Create collectible keyframe sprites (pre-rendered at init)
+  createCollectibleSprites();
 
   // Initialize collectibles
   for (int i = 0; i < MAX_COLLECTIBLES; i++) {
@@ -182,76 +178,79 @@ void BalloonScene::spawnCollectible(int index) {
   _collectibles[index].fadeTimer = 0.0f;
 }
 
-void BalloonScene::updateCollectibleSprite(float alpha) {
-  if (!_collectibleSprite) return;
+void BalloonScene::createCollectibleSprites() {
+  int spriteSize = (COLLECTIBLE_RADIUS + 2) * 2;
 
-  int spriteSize = _collectibleSprite->width();
-  int centerX = spriteSize / 2;
-  int centerY = spriteSize / 2;
+  // Create keyframes: full brightness (alpha 1.0) to faded (alpha 0.0)
+  for (int i = 0; i < COLLECTIBLE_KEYFRAMES; i++) {
+    float alpha = 1.0f - (float)i / (COLLECTIBLE_KEYFRAMES - 1);  // 1.0, 0.75, 0.5, 0.25, 0.0
 
-  // Extract RGB from hex color
-  uint8_t r = (COLLECTIBLE_COLOR >> 16) & 0xFF;
-  uint8_t g = (COLLECTIBLE_COLOR >> 8) & 0xFF;
-  uint8_t b = COLLECTIBLE_COLOR & 0xFF;
+    _collectibleSprites[i] = new LGFX_Sprite(&display.getLcd());
+    _collectibleSprites[i]->setColorDepth(16);
+    _collectibleSprites[i]->createSprite(spriteSize, spriteSize);
+    _collectibleSprites[i]->clear(TFT_BLACK);  // Black mask color
 
-  if (_collectibleSprite->getColorDepth() == 32) {
-    // 32-bit ARGB mode - use alpha channel
-    _collectibleSprite->clear(0x00000000);  // Fully transparent
+    int centerX = spriteSize / 2;
+    int centerY = spriteSize / 2;
 
-    // ARGB8888 format: need to check byte order
-    // LovyanGFX uses lgfx::argb8888_t which stores as {b, g, r, a} in memory
-    // So for a uint32_t in little-endian: 0xAABBGGRR
-    uint8_t outerAlpha = (uint8_t)(80 * alpha);
-    uint32_t outerColor = (b << 24) | (g << 16) | (r << 8) | outerAlpha;
-    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS + 1, outerColor);
+    // Fade = darker colors + smaller size
+    int maxRadius = COLLECTIBLE_RADIUS;
+    int radius = (int)(maxRadius * (0.5f + 0.5f * alpha));  // Size: 50% to 100%
 
-    uint8_t middleAlpha = (uint8_t)(180 * alpha);
-    uint32_t middleColor = (b << 24) | (g << 16) | (r << 8) | middleAlpha;
-    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS, middleColor);
+    if (radius > 0) {
+      // Extract white and fade color components
+      uint8_t whiteR = 255, whiteG = 255, whiteB = 255;
+      uint8_t fadeR = (COLLECTIBLE_FADE_COLOR >> 16) & 0xFF;
+      uint8_t fadeG = (COLLECTIBLE_FADE_COLOR >> 8) & 0xFF;
+      uint8_t fadeB = COLLECTIBLE_FADE_COLOR & 0xFF;
 
-    uint8_t coreAlpha = (uint8_t)(255 * alpha);
-    uint32_t coreColor = (b << 24) | (g << 16) | (r << 8) | coreAlpha;
-    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS - 1, coreColor);
-  } else {
-    // 16-bit fallback - use RGB565 with color key
-    _collectibleSprite->clear(TFT_BLACK);
+      // Outer edge (lerps more towards fade color)
+      float outerAlpha = alpha * COLLECTIBLE_OUTER_FADE;
+      uint8_t outerR = (uint8_t)(whiteR * outerAlpha + fadeR * (1.0f - outerAlpha));
+      uint8_t outerG = (uint8_t)(whiteG * outerAlpha + fadeG * (1.0f - outerAlpha));
+      uint8_t outerB = (uint8_t)(whiteB * outerAlpha + fadeB * (1.0f - outerAlpha));
+      _collectibleSprites[i]->fillCircle(centerX, centerY, radius,
+        Display::rgb565(outerR, outerG, outerB));
 
-    // Scale RGB values by alpha for fade effect
-    uint8_t sr = (uint8_t)(r * alpha);
-    uint8_t sg = (uint8_t)(g * alpha);
-    uint8_t sb = (uint8_t)(b * alpha);
+      // Middle (lerps more towards fade color)
+      if (radius > 1) {
+        float middleAlpha = alpha * COLLECTIBLE_MIDDLE_FADE;
+        uint8_t middleR = (uint8_t)(whiteR * middleAlpha + fadeR * (1.0f - middleAlpha));
+        uint8_t middleG = (uint8_t)(whiteG * middleAlpha + fadeG * (1.0f - middleAlpha));
+        uint8_t middleB = (uint8_t)(whiteB * middleAlpha + fadeB * (1.0f - middleAlpha));
+        _collectibleSprites[i]->fillCircle(centerX, centerY, radius - 1,
+          Display::rgb565(middleR, middleG, middleB));
+      }
 
-    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS + 1,
-      Display::rgb565(sr * 0.3, sg * 0.3, sb * 0.3));
-    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS,
-      Display::rgb565(sr * 0.7, sg * 0.7, sb * 0.7));
-    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS - 1,
-      Display::rgb565(sr, sg, sb));
+      // Core (lerped color)
+      if (radius > 2) {
+        uint8_t coreR = (uint8_t)(whiteR * alpha + fadeR * (1.0f - alpha));
+        uint8_t coreG = (uint8_t)(whiteG * alpha + fadeG * (1.0f - alpha));
+        uint8_t coreB = (uint8_t)(whiteB * alpha + fadeB * (1.0f - alpha));
+        _collectibleSprites[i]->fillCircle(centerX, centerY, radius - 2,
+          Display::rgb565(coreR, coreG, coreB));
+      }
+    }
   }
 }
 
 void BalloonScene::drawCollectible(Canvas& canvas, float x, float y, float alpha) {
-  if (alpha <= 0.01f || !_collectibleSprite) return;
+  if (alpha <= 0.01f) return;
 
-  // Only update sprite if alpha changed significantly (avoid recreating every frame)
-  if (fabs(alpha - _lastSpriteAlpha) > 0.05f) {
-    updateCollectibleSprite(alpha);
-    _lastSpriteAlpha = alpha;
-  }
+  // Select keyframe based on alpha (0.0 to 1.0)
+  int keyframe = (int)((1.0f - alpha) * (COLLECTIBLE_KEYFRAMES - 1) + 0.5f);
+  keyframe = constrain(keyframe, 0, COLLECTIBLE_KEYFRAMES - 1);
+
+  LGFX_Sprite* sprite = _collectibleSprites[keyframe];
+  if (!sprite) return;
 
   // Draw sprite at position (centered)
-  int spriteSize = _collectibleSprite->width();
+  int spriteSize = sprite->width();
   int drawX = (int)x - spriteSize / 2;
   int drawY = (int)y - spriteSize / 2;
 
-  // Push sprite
-  if (_collectibleSprite->getColorDepth() == 32) {
-    // 32-bit ARGB - alpha channel handles transparency
-    _collectibleSprite->pushSprite(&canvas, drawX, drawY);
-  } else {
-    // 16-bit fallback - use color key
-    _collectibleSprite->pushSprite(&canvas, drawX, drawY, TFT_BLACK);
-  }
+  // Push sprite with black as transparent mask
+  sprite->pushSprite(&canvas, drawX, drawY, TFT_BLACK);
 }
 
 void BalloonScene::checkCollectibleCollision(int balloonX, int balloonY) {
