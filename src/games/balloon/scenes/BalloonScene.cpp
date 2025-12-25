@@ -13,7 +13,7 @@
 // ========================================
 
 // Timing
-static const float SCROLL_SPEED = 30.0f;  // pixels per second
+static const float SCROLL_SPEED = 20.0f;  // pixels per second
 static const float COLLECTIBLE_SPEED = 40.0f;  // slightly faster than bg
 
 // Collectible
@@ -23,6 +23,8 @@ static const uint32_t COLLECTIBLE_FADE_COLOR = 0xfa9c78;  // Middle bg band colo
 static const float COLLECTIBLE_FADE_TIME = 0.25f;
 static const float COLLECTIBLE_OUTER_FADE = 0.6f;   // Outer edge lerps more towards fade color
 static const float COLLECTIBLE_MIDDLE_FADE = 0.8f;  // Middle lerps more towards fade color
+static const float COLLECTIBLE_SPAWN_DELAY_MIN = 0.0f;  // Minimum wait before respawn (seconds)
+static const float COLLECTIBLE_SPAWN_DELAY_MAX = 0.25f;  // Maximum wait before respawn (seconds)
 
 // Background tile (width for scrolling, height matches screen)
 static const int TILE_WIDTH = 64;
@@ -89,6 +91,8 @@ BalloonScene::BalloonScene()
   , _deltaNormalizedY(0)
   , _stringEndY(0)
   , _stringEndVelocity(0)
+  , _timeLeftToSpawn(0)
+  , _activeCollectibleCount(0)
   , _score(0) {
   for (int i = 0; i < COLLECTIBLE_KEYFRAMES; i++) {
     _collectibleSprites[i] = nullptr;
@@ -118,11 +122,6 @@ void BalloonScene::init() {
 
   // Create collectible keyframe sprites (pre-rendered at init)
   createCollectibleSprites();
-
-  // Initialize collectibles
-  for (int i = 0; i < MAX_COLLECTIBLES; i++) {
-    spawnCollectible(i);
-  }
 }
 
 void BalloonScene::generateBackgroundTile() {
@@ -171,11 +170,17 @@ void BalloonScene::generateBackgroundTile() {
 }
 
 void BalloonScene::spawnCollectible(int index) {
-  _collectibles[index].x = SCREEN_WIDTH + (rand() % SCREEN_WIDTH);
+  int spriteRad = COLLECTIBLE_RADIUS + 2;
+  _collectibles[index].x = SCREEN_WIDTH + spriteRad;
   _collectibles[index].y = BALLOON_Y_MARGIN + (rand() % (SCREEN_HEIGHT - 2 * BALLOON_Y_MARGIN));
   _collectibles[index].active = true;
   _collectibles[index].collecting = false;
   _collectibles[index].fadeTimer = 0.0f;
+  _activeCollectibleCount++;
+
+  // Set next spawn time
+  float range = COLLECTIBLE_SPAWN_DELAY_MAX - COLLECTIBLE_SPAWN_DELAY_MIN;
+  _timeLeftToSpawn = COLLECTIBLE_SPAWN_DELAY_MIN + (rand() / (float)RAND_MAX) * range;
 }
 
 void BalloonScene::createCollectibleSprites() {
@@ -244,10 +249,10 @@ void BalloonScene::drawCollectible(Canvas& canvas, float x, float y, float alpha
   LGFX_Sprite* sprite = _collectibleSprites[keyframe];
   if (!sprite) return;
 
-  // Draw sprite at position (centered)
+  // Draw sprite at position (centered, rounded to pixel boundaries)
   int spriteSize = sprite->width();
-  int drawX = (int)x - spriteSize / 2;
-  int drawY = (int)y - spriteSize / 2;
+  int drawX = (int)(x + 0.5f) - spriteSize / 2;
+  int drawY = (int)(y + 0.5f) - spriteSize / 2;
 
   // Push sprite with black as transparent mask
   sprite->pushSprite(&canvas, drawX, drawY, TFT_BLACK);
@@ -402,13 +407,28 @@ void BalloonScene::update(float dt) {
       _collectibles[i].fadeTimer += dt;
       if (_collectibles[i].fadeTimer >= COLLECTIBLE_FADE_TIME) {
         _collectibles[i].active = false;
-        spawnCollectible(i);
+        _activeCollectibleCount--;
       }
     }
 
-    // Respawn if off screen
+    // Deactivate if off screen
     if (_collectibles[i].x < -COLLECTIBLE_RADIUS && !_collectibles[i].collecting) {
-      spawnCollectible(i);
+      _collectibles[i].active = false;
+      _activeCollectibleCount--;
+    }
+  }
+
+  // Handle spawn timer
+  if (_timeLeftToSpawn > 0.0f) {
+    _timeLeftToSpawn -= dt;
+  }
+  else if (_activeCollectibleCount < MAX_COLLECTIBLES) {
+    // Find first inactive slot
+    for (int i = 0; i < MAX_COLLECTIBLES; i++) {
+      if (!_collectibles[i].active) {
+        spawnCollectible(i);
+        break;
+      }
     }
   }
 

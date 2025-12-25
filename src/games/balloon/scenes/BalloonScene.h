@@ -48,8 +48,10 @@ private:
   float _stringEndVelocity; // String end Y velocity
 
   // Collectibles
-  static const int MAX_COLLECTIBLES = 5;
+  static const int MAX_COLLECTIBLES = 50;
   Collectible _collectibles[MAX_COLLECTIBLES];
+  float _timeLeftToSpawn;
+  int _activeCollectibleCount;
 
   // Score
   unsigned long _score;
