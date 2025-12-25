@@ -1,6 +1,7 @@
 #include "BalloonScene.h"
 #include "core/hardware/BreathData.h"
 #include "core/hardware/Display.h"
+#include <cmath>
 
 #ifndef SIMULATOR
   #include <Arduino.h>
@@ -24,7 +25,11 @@ static const float COLLECTIBLE_FADE_TIME = 0.25f;
 static const float COLLECTIBLE_OUTER_FADE = 0.6f;   // Outer edge lerps more towards fade color
 static const float COLLECTIBLE_MIDDLE_FADE = 0.8f;  // Middle lerps more towards fade color
 static const float COLLECTIBLE_SPAWN_DELAY_MIN = 0.0f;  // Minimum wait before respawn (seconds)
-static const float COLLECTIBLE_SPAWN_DELAY_MAX = 0.25f;  // Maximum wait before respawn (seconds)
+static const float COLLECTIBLE_SPAWN_DELAY_MAX = 0.15f;  // Maximum wait before respawn (seconds)
+static const float COLLECTIBLE_SPAWN_Y_MIN = 0.15f;      // Spawn wave min (15% of screen height)
+static const float COLLECTIBLE_SPAWN_Y_MAX = 0.85f;      // Spawn wave max (85% of screen height)
+static const float COLLECTIBLE_SPAWN_WAVE_FREQ = 0.75f;  // Sine wave frequency
+static const float COLLECTIBLE_SPAWN_Y_DEVIATION = 0.08f; // Random Y deviation (proportion of screen height)
 
 // Background tile (width for scrolling, height matches screen)
 static const int TILE_WIDTH = 64;
@@ -93,6 +98,7 @@ BalloonScene::BalloonScene()
   , _stringEndVelocity(0)
   , _timeLeftToSpawn(0)
   , _activeCollectibleCount(0)
+  , _elapsedTime(0)
   , _score(0) {
   for (int i = 0; i < COLLECTIBLE_KEYFRAMES; i++) {
     _collectibleSprites[i] = nullptr;
@@ -172,7 +178,19 @@ void BalloonScene::generateBackgroundTile() {
 void BalloonScene::spawnCollectible(int index) {
   int spriteRad = COLLECTIBLE_RADIUS + 2;
   _collectibles[index].x = SCREEN_WIDTH + spriteRad;
-  _collectibles[index].y = BALLOON_Y_MARGIN + (rand() % (SCREEN_HEIGHT - 2 * BALLOON_Y_MARGIN));
+
+  // Calculate Y using sine wave based on elapsed time + random deviation
+  float wavePhase = _elapsedTime * COLLECTIBLE_SPAWN_WAVE_FREQ;
+  float sinValue = sin(wavePhase);  // -1 to 1
+  float normalizedSin = (sinValue + 1.0f) / 2.0f;  // 0 to 1
+
+  float minY = SCREEN_HEIGHT * COLLECTIBLE_SPAWN_Y_MIN;
+  float maxY = SCREEN_HEIGHT * COLLECTIBLE_SPAWN_Y_MAX;
+  float baseY = minY + normalizedSin * (maxY - minY);
+
+  float deviation = ((rand() / (float)RAND_MAX) - 0.5f) * 2.0f * COLLECTIBLE_SPAWN_Y_DEVIATION * SCREEN_HEIGHT;
+  _collectibles[index].y = baseY + deviation;
+
   _collectibles[index].active = true;
   _collectibles[index].collecting = false;
   _collectibles[index].fadeTimer = 0.0f;
@@ -371,6 +389,9 @@ void BalloonScene::drawBalloon(Canvas& canvas, int x, int y, uint16_t color, flo
 }
 
 void BalloonScene::update(float dt) {
+  // Track elapsed time for sine wave spawn pattern
+  _elapsedTime += dt;
+
   // Update scroll position (scroll left)
   _scrollX += SCROLL_SPEED * dt;
   if (_scrollX >= TILE_WIDTH) {
