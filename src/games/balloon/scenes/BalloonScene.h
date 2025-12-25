@@ -34,6 +34,11 @@ private:
   LGFX_Sprite* _bgTile;
   float _scrollX;
 
+  // Collectible sprite
+  LGFX_Sprite* _collectibleSprite;
+  float _lastSpriteAlpha;
+  void updateCollectibleSprite(float alpha);
+
   // Balloon state
   float _smoothedNormalized;
   float _deltaNormalizedY;

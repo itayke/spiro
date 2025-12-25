@@ -81,6 +81,8 @@ static const uint32_t STRING_COLOR = 0x64503C;
 
 BalloonScene::BalloonScene()
   : _bgTile(nullptr)
+  , _collectibleSprite(nullptr)
+  , _lastSpriteAlpha(-1.0f)
   , _scrollX(0)
   , _smoothedNormalized(0)
   , _deltaNormalizedY(0)
@@ -95,6 +97,11 @@ BalloonScene::~BalloonScene() {
     delete _bgTile;
     _bgTile = nullptr;
   }
+  if (_collectibleSprite) {
+    _collectibleSprite->deleteSprite();
+    delete _collectibleSprite;
+    _collectibleSprite = nullptr;
+  }
 }
 
 void BalloonScene::init() {
@@ -102,6 +109,19 @@ void BalloonScene::init() {
   _bgTile->setColorDepth(16);
   _bgTile->createSprite(TILE_WIDTH, TILE_HEIGHT);
   generateBackgroundTile();
+
+  // Create collectible sprite
+  // Note: Simulator's 32-bit support is broken (creates sprite but crashes on use)
+  int spriteSize = (COLLECTIBLE_RADIUS + 2) * 2;
+  _collectibleSprite = new LGFX_Sprite(&display.getLcd());
+
+#ifdef SIMULATOR
+  _collectibleSprite->setColorDepth(16);  // Simulator: use 16-bit RGB565
+#else
+  _collectibleSprite->setColorDepth(32);  // Hardware: use 32-bit ARGB for proper alpha
+#endif
+
+  _collectibleSprite->createSprite(spriteSize, spriteSize);
 
   // Initialize collectibles
   for (int i = 0; i < MAX_COLLECTIBLES; i++) {
@@ -162,36 +182,76 @@ void BalloonScene::spawnCollectible(int index) {
   _collectibles[index].fadeTimer = 0.0f;
 }
 
-void BalloonScene::drawCollectible(Canvas& canvas, float x, float y, float alpha) {
-  // Get background color at collectible position
-  int collectY = (int)y;
-  int band = collectY / (TILE_HEIGHT / NUM_BANDS);
-  if (band >= NUM_BANDS) band = NUM_BANDS - 1;
-  uint32_t bgHex = SUNSET_BANDS[band];
-  uint8_t bgR = (bgHex >> 16) & 0xFF;
-  uint8_t bgG = (bgHex >> 8) & 0xFF;
-  uint8_t bgB = bgHex & 0xFF;
+void BalloonScene::updateCollectibleSprite(float alpha) {
+  if (!_collectibleSprite) return;
 
+  int spriteSize = _collectibleSprite->width();
+  int centerX = spriteSize / 2;
+  int centerY = spriteSize / 2;
+
+  // Extract RGB from hex color
   uint8_t r = (COLLECTIBLE_COLOR >> 16) & 0xFF;
   uint8_t g = (COLLECTIBLE_COLOR >> 8) & 0xFF;
   uint8_t b = COLLECTIBLE_COLOR & 0xFF;
 
-  // Pure white fading to background
-  canvas.fillCircle((int)x, (int)y, COLLECTIBLE_RADIUS + 1,
-    Display::rgb565(
-      bgR * (1.0f - alpha * 0.3f) + r * alpha * 0.3f,
-      bgG * (1.0f - alpha * 0.3f) + g * alpha * 0.3f,
-      bgB * (1.0f - alpha * 0.3f) + b * alpha * 0.3f));
-  canvas.fillCircle((int)x, (int)y, COLLECTIBLE_RADIUS,
-    Display::rgb565(
-      bgR * (1.0f - alpha * 0.6f) + r * alpha * 0.6f,
-      bgG * (1.0f - alpha * 0.6f) + g * alpha * 0.6f,
-      bgB * (1.0f - alpha * 0.6f) + b * alpha * 0.6f));
-  canvas.fillCircle((int)x, (int)y, COLLECTIBLE_RADIUS - 1,
-    Display::rgb565(
-      bgR * (1.0f - alpha) + r * alpha,
-      bgG * (1.0f - alpha) + g * alpha,
-      bgB * (1.0f - alpha) + b * alpha));
+  if (_collectibleSprite->getColorDepth() == 32) {
+    // 32-bit ARGB mode - use alpha channel
+    _collectibleSprite->clear(0x00000000);  // Fully transparent
+
+    // ARGB8888 format: need to check byte order
+    // LovyanGFX uses lgfx::argb8888_t which stores as {b, g, r, a} in memory
+    // So for a uint32_t in little-endian: 0xAABBGGRR
+    uint8_t outerAlpha = (uint8_t)(80 * alpha);
+    uint32_t outerColor = (b << 24) | (g << 16) | (r << 8) | outerAlpha;
+    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS + 1, outerColor);
+
+    uint8_t middleAlpha = (uint8_t)(180 * alpha);
+    uint32_t middleColor = (b << 24) | (g << 16) | (r << 8) | middleAlpha;
+    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS, middleColor);
+
+    uint8_t coreAlpha = (uint8_t)(255 * alpha);
+    uint32_t coreColor = (b << 24) | (g << 16) | (r << 8) | coreAlpha;
+    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS - 1, coreColor);
+  } else {
+    // 16-bit fallback - use RGB565 with color key
+    _collectibleSprite->clear(TFT_BLACK);
+
+    // Scale RGB values by alpha for fade effect
+    uint8_t sr = (uint8_t)(r * alpha);
+    uint8_t sg = (uint8_t)(g * alpha);
+    uint8_t sb = (uint8_t)(b * alpha);
+
+    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS + 1,
+      Display::rgb565(sr * 0.3, sg * 0.3, sb * 0.3));
+    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS,
+      Display::rgb565(sr * 0.7, sg * 0.7, sb * 0.7));
+    _collectibleSprite->fillCircle(centerX, centerY, COLLECTIBLE_RADIUS - 1,
+      Display::rgb565(sr, sg, sb));
+  }
+}
+
+void BalloonScene::drawCollectible(Canvas& canvas, float x, float y, float alpha) {
+  if (alpha <= 0.01f || !_collectibleSprite) return;
+
+  // Only update sprite if alpha changed significantly (avoid recreating every frame)
+  if (fabs(alpha - _lastSpriteAlpha) > 0.05f) {
+    updateCollectibleSprite(alpha);
+    _lastSpriteAlpha = alpha;
+  }
+
+  // Draw sprite at position (centered)
+  int spriteSize = _collectibleSprite->width();
+  int drawX = (int)x - spriteSize / 2;
+  int drawY = (int)y - spriteSize / 2;
+
+  // Push sprite
+  if (_collectibleSprite->getColorDepth() == 32) {
+    // 32-bit ARGB - alpha channel handles transparency
+    _collectibleSprite->pushSprite(&canvas, drawX, drawY);
+  } else {
+    // 16-bit fallback - use color key
+    _collectibleSprite->pushSprite(&canvas, drawX, drawY, TFT_BLACK);
+  }
 }
 
 void BalloonScene::checkCollectibleCollision(int balloonX, int balloonY) {
